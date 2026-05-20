@@ -14,6 +14,7 @@ export default function Login({ onLoginSuccess, onApplyClick, onAdminClick }: Lo
   const [programmerName, setProgrammerName] = useState('حمد الحبسي');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,8 +25,29 @@ export default function Login({ onLoginSuccess, onApplyClick, onAdminClick }: Lo
       return;
     }
 
-    // Accept hamadalhabsi208@gmail.com or any input for demonstration
-    onLoginSuccess(programmerName || 'حمد الحبسي');
+    setIsLoading(true);
+
+    fetch('/api/login', {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (res.ok && data.success) {
+          // If the server returns a specific name, use it; otherwise fallback
+          onLoginSuccess(data.name || programmerName || 'حمد الحبسي');
+        } else {
+          setError(data.error || 'فصل تسجيل الدخول، يرجى التحقق من صحة البيانات.');
+        }
+      })
+      .catch((err) => {
+        console.error("Error logging in", err);
+        setError('حدث خطأ بالاتصال بالخادم، يرجى التجربة لاحقاً.');
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
   };
 
   return (
@@ -95,14 +117,14 @@ export default function Login({ onLoginSuccess, onApplyClick, onAdminClick }: Lo
           <div className="bg-amber-500/5 border border-amber-500/20 p-3.5 rounded-2xl mb-4">
             <div className="flex items-center gap-1 text-xs text-amber-400 font-bold mb-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>اسم المبرمج (لعرضه في جملة الترحيب اللامعة):</span>
+              <span>اسم المرشد (لعرضه في جملة الترحيب اللامعة):</span>
             </div>
             <input
               id="programmer-name-input"
               type="text"
               value={programmerName}
               onChange={(e) => setProgrammerName(e.target.value)}
-              placeholder="اكتب اسم المبرمج هنا..."
+              placeholder="اكتب اسم المرشد هنا..."
               className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-amber-300 placeholder-slate-600 text-sm focus:outline-none focus:border-amber-500/50 transition-all font-medium"
             />
           </div>
@@ -145,9 +167,10 @@ export default function Login({ onLoginSuccess, onApplyClick, onAdminClick }: Lo
             <button
               id="btn-login-submit"
               type="submit"
-              className="w-full py-3 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-slate-950 rounded-2xl font-bold tracking-wide transition-all shadow-lg shadow-amber-500/10 cursor-pointer"
+              disabled={isLoading}
+              className="w-full py-3 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-slate-950 rounded-2xl font-bold tracking-wide transition-all shadow-lg shadow-amber-500/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              تسجيل الدخول
+              {isLoading ? 'جاري التحقق...' : 'تسجيل الدخول'}
             </button>
           </div>
         </form>

@@ -37,6 +37,9 @@ export default function AdminPanel({ onBackToLogin }: AdminPanelProps) {
   // Ticket reply states
   const [replyTexts, setReplyTexts] = useState<Record<string, string>>({});
 
+  // Password assignment states
+  const [assignedPasswords, setAssignedPasswords] = useState<Record<string, string>>({});
+
   // Synchronize state from server (PostgreSQL database) on mount
   useEffect(() => {
     // 1. Fetch applications
@@ -141,11 +144,11 @@ export default function AdminPanel({ onBackToLogin }: AdminPanelProps) {
   };
 
   // Applications Actions
-  const handleAppStatusChange = (id: string, newStatus: 'approved' | 'rejected') => {
+  const handleAppStatusChange = (id: string, newStatus: 'approved' | 'rejected', password?: string) => {
     fetch(`/api/applications/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus })
+      body: JSON.stringify({ status: newStatus, password })
     })
       .then(res => res.json())
       .then(updatedApp => {
@@ -155,7 +158,7 @@ export default function AdminPanel({ onBackToLogin }: AdminPanelProps) {
       })
       .catch(err => {
         console.error("Failed to update status on server, falling back to local state:", err);
-        const updated = applications.map(app => app.id === id ? { ...app, status: newStatus } : app);
+        const updated = applications.map(app => app.id === id ? { ...app, status: newStatus, ...(password ? { password } : {}) } : app);
         setApplications(updated);
         localStorage.setItem('shouma_applications', JSON.stringify(updated));
       });
@@ -514,6 +517,35 @@ export default function AdminPanel({ onBackToLogin }: AdminPanelProps) {
                       <div>
                         <span className="text-[10px] text-slate-500 block">التوصيف الذاتي والخبرات:</span>
                         <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/60 p-3 rounded-lg border border-slate-850/80 mt-1">{app.description}</p>
+                      </div>
+
+                      {/* تعيين وتعديل كلمة المرور للمرشد للتحكم بحسابه */}
+                      <div className="mt-4 pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-amber-500/5 p-4 rounded-xl border border-amber-500/10">
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-amber-400 block">🔑 تفاصيل حساب المرشد:</span>
+                          <span className="text-[11px] text-slate-400 block font-mono">البريد الإلكتروني: {app.email}</span>
+                          {app.status === 'approved' && (
+                            <span className="text-[10px] text-emerald-400 font-bold block">✓ الحساب مفعل ومصرح له بالدخول</span>
+                          )}
+                        </div>
+                        <div className="flex gap-2 w-full sm:w-auto items-center">
+                          <input
+                            type="text"
+                            placeholder="كلمة مرور الدخول للمرشد"
+                            value={assignedPasswords[app.id] ?? app.password ?? 'shouma2026'}
+                            onChange={(e) => setAssignedPasswords(prev => ({ ...prev, [app.id]: e.target.value }))}
+                            className="px-3 py-1.5 bg-slate-950 border border-slate-800 text-xs text-amber-300 placeholder-slate-650 rounded-lg w-full sm:w-44 focus:outline-none focus:border-amber-500/50 font-mono"
+                          />
+                          <button
+                            onClick={() => {
+                              const pwd = assignedPasswords[app.id] ?? app.password ?? 'shouma2026';
+                              handleAppStatusChange(app.id, 'approved', pwd);
+                            }}
+                            className="px-4 py-1.5 bg-amber-500 text-slate-950 hover:bg-amber-600 font-bold text-xs rounded-lg transition-all whitespace-nowrap cursor-pointer"
+                          >
+                            موافقة وتعيين كلمة المرور
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

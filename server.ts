@@ -34,7 +34,7 @@ const pool = new Pool(dbConfig);
 let useMemoryFallback = false;
 
 // Memory Fallback DB Store
-let memApps = [
+let memApps: any[] = [
   {
     id: "app-1",
     name: "سالم بن عبدالله الكندي",
@@ -137,6 +137,11 @@ async function initDb() {
         status VARCHAR(20) DEFAULT 'pending',
         submitted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Add password column to guide_applications safely if it doesn't exist
+    await client.query(`
+      ALTER TABLE guide_applications ADD COLUMN IF NOT EXISTS password VARCHAR(255);
     `);
 
     // Create Support Tickets table
@@ -258,7 +263,8 @@ app.get("/api/applications", async (req, res) => {
       languages: row.languages,
       description: row.description,
       status: row.status,
-      submittedAt: row.submitted_at
+      submittedAt: row.submitted_at,
+      password: row.password || ""
     }));
     res.json(apps);
   } catch (err: any) {
@@ -273,18 +279,18 @@ app.post("/api/applications", async (req, res) => {
   const status = "pending";
 
   if (useMemoryFallback) {
-    const newApp = { id, name, age, phone, email, nationality, governorate, languages, description, status, submittedAt };
+    const newApp = { id, name, age, phone, email, nationality, governorate, languages, description, status, submittedAt, password: "" };
     memApps = [newApp, ...memApps];
     return res.json(newApp);
   }
 
   try {
     await pool.query(
-      `INSERT INTO guide_applications (id, name, age, phone, email, nationality, governorate, languages, description, status, submitted_at) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [id, name, age, phone, email, nationality, governorate, languages, description, status, submittedAt]
+      `INSERT INTO guide_applications (id, name, age, phone, email, nationality, governorate, languages, description, status, submitted_at, password) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [id, name, age, phone, email, nationality, governorate, languages, description, status, submittedAt, ""]
     );
-    res.json({ id, name, age, phone, email, nationality, governorate, languages, description, status, submittedAt });
+    res.json({ id, name, age, phone, email, nationality, governorate, languages, description, status, submittedAt, password: "" });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -292,19 +298,28 @@ app.post("/api/applications", async (req, res) => {
 
 app.put("/api/applications/:id", async (req, res) => {
   const { id } = req.params;
-  const { status } = req.body; // 'approved' | 'rejected'
+  const { status, password } = req.body; // 'approved' | 'rejected', password
 
   if (useMemoryFallback) {
-    memApps = memApps.map(app => app.id === id ? { ...app, status } : app);
+    memApps = memApps.map(app => app.id === id ? { ...app, status, password: password !== undefined ? password : app.password } : app);
     const updated = memApps.find(app => app.id === id);
     return res.json(updated);
   }
 
   try {
-    const result = await pool.query(
-      "UPDATE guide_applications SET status = $1 WHERE id = $2 RETURNING *",
-      [status, id]
-    );
+    let result;
+    if (password !== undefined) {
+      result = await pool.query(
+        "UPDATE guide_applications SET status = $1, password = $2 WHERE id = $3 RETURNING *",
+        [status, password, id]
+      );
+    } else {
+      result = await pool.query(
+        "UPDATE guide_applications SET status = $1 WHERE id = $2 RETURNING *",
+        [status, id]
+      );
+    }
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Application not found" });
     }
@@ -320,7 +335,8 @@ app.put("/api/applications/:id", async (req, res) => {
       languages: row.languages,
       description: row.description,
       status: row.status,
-      submittedAt: row.submitted_at
+      submittedAt: row.submitted_at,
+      password: row.password || ""
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -580,6 +596,72 @@ app.put("/api/tickets/:id", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// --- 5. AUTHENTICATION (LOGIN) ENDPOINT ---
+
+app.post("/api/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "الرجاء إدخال البريد الإلكتروني وكلمة المرور." });
+  }
+
+  // A. Check if master admin / owner first
+  if (email.toLowerCase() === "hamadalhabsi208@gmail.com" && password === "shouma2026") {
+    return res.json({
+      success: true,
+      name: "حمد الحبسي",
+      email: email,
+      role: "admin"
+    });
+  }
+
+  // B. Otherwise check in guide_applications
+  if (useMemoryFallback) {
+    const found = memApps.find(app => {
+      const emailMatch = app.email.toLowerCase() === email.toLowerCase();
+      const appPass = app.password || "shouma2026"; // default pre-loaded password fallback
+      const passMatch = appPass === password;
+      const approved = app.status === "approved";
+      return emailMatch && passMatch && approved;
+    });
+
+    if (found) {
+      return res.json({
+        success: true,
+        name: found.name,
+        email: found.email,
+        role: "guide"
+      });
+    }
+  } else {
+    try {
+      const result = await pool.query(
+        "SELECT * FROM guide_applications WHERE LOWER(email) = LOWER($1) AND status = 'approved'",
+        [email]
+      );
+
+      if (result.rows.length > 0) {
+        const found = result.rows[0];
+        const dbPass = found.password || "shouma2026"; // default password fallback
+        if (dbPass === password) {
+          return res.json({
+            success: true,
+            name: found.name,
+            email: found.email,
+            role: "guide"
+          });
+        }
+      }
+    } catch (err: any) {
+      return res.status(500).json({ error: "حدث خطأ في قاعدة البيانات: " + err.message });
+    }
+  }
+
+  return res.status(401).json({
+    error: "البريد الإلكتروني أو كلمة المرور غير صحيحة، أو أن حسابك لم يُعتمد أو يُفعل من قِبل الإدارة بعد."
+  });
 });
 
 // --- VITE MIDDLEWARE SETUP ---

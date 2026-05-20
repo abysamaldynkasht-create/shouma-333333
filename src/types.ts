@@ -10,6 +10,7 @@ export interface GuideApplication {
   description: string;
   status: 'pending' | 'approved' | 'rejected';
   submittedAt: string;
+  password?: string;
 }
 
 export interface SupportTicket {
